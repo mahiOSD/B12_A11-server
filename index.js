@@ -2,47 +2,17 @@ require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const { MongoClient, ServerApiVersion } = require('mongodb')
-const admin = require('firebase-admin')
-const port = process.env.PORT || 3000
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
-  'utf-8'
-)
-const serviceAccount = JSON.parse(decoded)
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-})
 
+const port = process.env.PORT || 5000
 const app = express()
 
 app.use(
   cors({
-    origin: [
-      'http://localhost:5173',
-      'http://localhost:5174',
-      
-    ],
+    origin: ['http://localhost:5173'], 
     credentials: true,
-    optionSuccessStatus: 200,
   })
 )
 app.use(express.json())
-
-
-const verifyJWT = async (req, res, next) => {
-  const token = req?.headers?.authorization?.split(' ')[1]
-  console.log(token)
-  if (!token) return res.status(401).send({ message: 'Unauthorized Access!' })
-  try {
-    const decoded = await admin.auth().verifyIdToken(token)
-    req.tokenEmail = decoded.email
-    console.log(decoded)
-    next()
-  } catch (err) {
-    console.log(err)
-    return res.status(401).send({ message: 'Unauthorized Access!', err })
-  }
-}
-
 
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: {
@@ -51,23 +21,38 @@ const client = new MongoClient(process.env.MONGODB_URI, {
     deprecationErrors: true,
   },
 })
+
 async function run() {
   try {
+    const db = client.db('localchef') 
+    const mealsCollection = db.collection('meals')
+    const reviewsCollection = db.collection('reviews')
+
     
+    app.get('/meals-limit-6', async (req, res) => {
+      const meals = await mealsCollection.find().limit(6).toArray()
+      res.send(meals)
+    })
+
+   
+    app.get('/reviews', async (req, res) => {
+      const reviews = await reviewsCollection.find().toArray()
+      res.send(reviews)
+    })
+
+    
+    app.get('/', (req, res) => {
+      res.send('Hello from LocalChefBazaar server!')
+    })
+
     await client.db('admin').command({ ping: 1 })
-    console.log(
-      'Pinged your deployment. You successfully connected to MongoDB!'
-    )
-  } finally {
-    
+    console.log('MongoDB connected successfully!')
+  } catch (err) {
+    console.error(err)
   }
 }
 run().catch(console.dir)
 
-app.get('/', (req, res) => {
-  res.send('Hello from Server..')
-})
-
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`)
+  console.log(`Server running on port ${port}`)
 })
