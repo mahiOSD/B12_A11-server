@@ -8,10 +8,11 @@ const app = express()
 
 app.use(
   cors({
-    origin: ['http://localhost:5173'], 
+    origin: ['http://localhost:5173'],
     credentials: true,
   })
 )
+
 app.use(express.json())
 
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -24,35 +25,53 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 async function run() {
   try {
-    const db = client.db('localchef') 
+    await client.connect()
+
+    const db = client.db('localchef')
     const mealsCollection = db.collection('meals')
     const reviewsCollection = db.collection('reviews')
+    const usersCollection = db.collection('users')
 
-    
+
+    app.post('/users', async (req, res) => {
+      const user = req.body
+
+      const existingUser = await usersCollection.findOne({
+        email: user.email,
+      })
+
+      if (existingUser) {
+        return res.send({ message: 'User already exists' })
+      }
+
+      const result = await usersCollection.insertOne(user)
+      res.send(result)
+    })
+
+  
     app.get('/meals-limit-6', async (req, res) => {
       const meals = await mealsCollection.find().limit(6).toArray()
       res.send(meals)
     })
 
-   
+  
     app.get('/reviews', async (req, res) => {
       const reviews = await reviewsCollection.find().toArray()
       res.send(reviews)
     })
 
-    
     app.get('/', (req, res) => {
-      res.send('Hello from LocalChefBazaar server!')
+      res.send('Server running')
     })
 
-    await client.db('admin').command({ ping: 1 })
-    console.log('MongoDB connected successfully!')
+    console.log('MongoDB Connected')
   } catch (err) {
-    console.error(err)
+    console.log(err)
   }
 }
-run().catch(console.dir)
+
+run()
 
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`)
+  console.log(`Server running on ${port}`)
 })
