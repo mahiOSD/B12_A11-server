@@ -32,8 +32,31 @@ async function run() {
 
     console.log("MongoDB Connected");
 
-   
-    app.get("/meals", async (req, res) => {
+  app.post("/users", async (req, res) => {
+  const user = req.body;
+
+  const existingUser = await usersCollection.findOne({
+    email: user.email,
+  });
+
+  if (existingUser) {
+    return res.send({ message: "User already exists" });
+  }
+
+  const result = await usersCollection.insertOne(user);
+  res.send(result);
+});
+
+app.get("/users/:email", async (req, res) => {
+  const email = req.params.email;
+
+  const user = await usersCollection.findOne({ email });
+
+  res.send(user);
+});
+
+
+app.get("/meals", async (req, res) => {
       const result = await mealsCollection.find().toArray();
       res.send(result);
     });
@@ -141,14 +164,71 @@ app.get("/reviews", async (req, res) => {
       res.send(result);
     });
 
-    app.post("/role-request", async (req, res) => {
-      const request = req.body;
-      request.requestStatus = "pending";
-      request.requestTime = new Date();
+   app.post("/role-request", async (req, res) => {
+  try {
+    const request = req.body;
 
-      const result = await roleRequestCollection.insertOne(request);
-      res.send(result);
-    });
+    const newRequest = {
+      userName: request.userName,
+      userEmail: request.userEmail,
+      requestType: request.requestType,
+      requestStatus: "pending",
+      requestTime: new Date(),
+    };
+
+    const result = await roleRequestCollection.insertOne(newRequest);
+
+    res.send(result);
+  } catch (error) {
+    console.error("Role request error:", error);
+    res.status(500).send({ error: "Failed to create role request" });
+  }
+});
+
+    
+app.get("/role-requests", async (req, res) => {
+  try {
+    const requests = await roleRequestCollection
+      .find()
+      .sort({ requestTime: -1 })
+      .toArray();
+    res.send(requests);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Server error" });
+  }
+});
+
+
+app.patch("/role-requests/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body; 
+
+    const request = await roleRequestCollection.findOne({ _id: new ObjectId(id) });
+    if (!request) return res.status(404).send({ error: "Request not found" });
+
+  
+    if (action === "approve") {
+      await usersCollection.updateOne(
+        { email: request.userEmail },
+        { $set: { role: request.requestType } }
+      );
+    }
+
+   
+    const result = await roleRequestCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { requestStatus: action === "approve" ? "approved" : "rejected" } }
+    );
+
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Server error" });
+  }
+});
+
 
    
     app.get("/", (req, res) => {
