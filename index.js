@@ -61,7 +61,7 @@ app.get("/meals", async (req, res) => {
       res.send(result);
     });
 
-    app.get("/meals/:id", async (req, res) => {
+app.get("/meals/:id", async (req, res) => {
       const id = req.params.id;
 
       if (!ObjectId.isValid(id)) {
@@ -100,6 +100,8 @@ app.get("/meals", async (req, res) => {
       const result = await reviewsCollection.insertOne(review);
       res.send(result);
     });
+
+
 app.get("/meals-limit-6", async (req, res) => {
   const result = await mealsCollection
     .find()
@@ -108,6 +110,7 @@ app.get("/meals-limit-6", async (req, res) => {
 
   res.send(result);
 });
+
 app.get("/reviews", async (req, res) => {
   const result = await reviewsCollection
     .find()
