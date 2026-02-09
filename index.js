@@ -32,28 +32,40 @@ async function run() {
 
     console.log("MongoDB Connected");
 
-  app.post("/users", async (req, res) => {
+ app.post("/users", async (req, res) => {
   const user = req.body;
 
   const existingUser = await usersCollection.findOne({
-    email: user.email,
+    email: user.email.toLowerCase(),
   });
 
   if (existingUser) {
     return res.send({ message: "User already exists" });
   }
 
-  const result = await usersCollection.insertOne(user);
+  const newUser = {
+    ...user,
+    email: user.email.toLowerCase(),
+    role: user.role || "user",
+    createdAt: new Date(),
+  };
+
+  const result = await usersCollection.insertOne(newUser);
+
   res.send(result);
 });
 
-app.get("/users/:email", async (req, res) => {
-  const email = req.params.email;
 
-  const user = await usersCollection.findOne({ email });
+app.get("/users/:email", async (req, res) => {
+  const email = req.params.email.toLowerCase();
+
+  const user = await usersCollection.findOne({
+    email: { $regex: new RegExp("^" + email + "$", "i") }
+  });
 
   res.send(user);
 });
+
 
 
 app.get("/meals", async (req, res) => {
@@ -232,9 +244,7 @@ app.patch("/role-requests/:id", async (req, res) => {
   }
 });
 
-
-   
-    app.get("/", (req, res) => {
+     app.get("/", (req, res) => {
       res.send({ status: "Server is running" });
     });
   } catch (err) {
