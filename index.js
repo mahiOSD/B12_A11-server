@@ -161,6 +161,29 @@ app.get("/reviews", async (req, res) => {
       res.send(result);
     });
 
+    
+app.delete("/reviews/:id", async (req, res) => {
+  await reviewsCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+  res.send({ message: "Deleted" });
+});
+
+
+app.put("/reviews/:id", async (req, res) => {
+  const { rating, comment } = req.body;
+  await reviewsCollection.updateOne(
+    { _id: new ObjectId(req.params.id) },
+    { $set: { rating, comment } }
+  );
+  res.send({ message: "Updated" });
+});
+
+
+app.delete("/favorites/:id", async (req, res) => {
+  await favoritesCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+  res.send({ message: "Deleted" });
+});
+
+
   
     app.post("/orders", async (req, res) => {
       const order = req.body;
@@ -171,15 +194,33 @@ app.get("/reviews", async (req, res) => {
       res.send(result);
     });
 
+    app.get("/orders", async (req, res) => {
+  const result = await ordersCollection.find().toArray();
+  res.send(result);
+});
+
+
     app.get("/orders/:email", async (req, res) => {
-      const result = await ordersCollection
-        .find({ userEmail: req.params.email })
-        .toArray();
+  const email = req.params.email;
 
-      res.send(result);
-    });
+  const result = await ordersCollection
+    .find({ userEmail: email })
+    .toArray();
 
-   app.post("/role-request", async (req, res) => {
+  res.send(result);
+});
+
+app.get("/chef-orders/:chefId", async (req, res) => {
+  const chefId = req.params.chefId;
+  const result = await ordersCollection
+    .find({ chefId: chefId })
+    .sort({ orderTime: -1 })
+    .toArray();
+  res.send(result);
+});
+
+
+app.post("/role-request", async (req, res) => {
   try {
     const request = req.body;
 
@@ -215,7 +256,9 @@ app.get("/role-requests", async (req, res) => {
 });
 
 
-app.patch("/role-requests/:id", async (req, res) => {
+
+
+  app.patch("/role-requests/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { action } = req.body; 
@@ -223,26 +266,43 @@ app.patch("/role-requests/:id", async (req, res) => {
     const request = await roleRequestCollection.findOne({ _id: new ObjectId(id) });
     if (!request) return res.status(404).send({ error: "Request not found" });
 
-  
+    let updateData = {};
+
     if (action === "approve") {
+      let updatedFields = { role: request.requestType };
+
+      
+      if (request.requestType === "chef") {
+        const randomId = Math.floor(1000 + Math.random() * 9000); 
+        updatedFields.chefId = `chef-${randomId}`;
+      }
+
+      
       await usersCollection.updateOne(
         { email: request.userEmail },
-        { $set: { role: request.requestType } }
+        { $set: updatedFields }
       );
+
+      
+      updateData.requestStatus = "approved";
+
+    } else if (action === "reject") {
+      updateData.requestStatus = "rejected";
     }
 
-   
     const result = await roleRequestCollection.updateOne(
       { _id: new ObjectId(id) },
-      { $set: { requestStatus: action === "approve" ? "approved" : "rejected" } }
+      { $set: updateData }
     );
 
-    res.send(result);
+    res.send({ message: `Request ${action}d successfully`, result });
+
   } catch (err) {
     console.error(err);
     res.status(500).send({ error: "Server error" });
   }
 });
+
 
      app.get("/", (req, res) => {
       res.send({ status: "Server is running" });
