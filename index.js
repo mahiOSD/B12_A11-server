@@ -256,9 +256,7 @@ app.get("/role-requests", async (req, res) => {
 });
 
 
-
-
-  app.patch("/role-requests/:id", async (req, res) => {
+app.patch("/role-requests/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { action } = req.body; 
@@ -303,8 +301,54 @@ app.get("/role-requests", async (req, res) => {
   }
 });
 
+const multer = require("multer");
+const path = require("path");
 
-     app.get("/", (req, res) => {
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/"); 
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, Date.now() + ext);
+  }
+});
+
+const upload = multer({ storage: storage });
+
+
+app.use("/uploads", express.static("uploads"));
+
+
+app.post("/meals", upload.single("foodImage"), async (req, res) => {
+  try {
+    const { foodName, price, rating, ingredients, estimatedDeliveryTime, chefExperience, chefName, chefId, userEmail } = req.body;
+
+    const newMeal = {
+      name: foodName,
+      price: Number(price),
+      rating: Number(rating),
+      ingredients: Array.isArray(ingredients) ? ingredients : [ingredients],
+      estimatedDeliveryTime,
+      chefExperience,
+      chefName,
+      chefId,
+      userEmail,
+      image: req.file ? `/uploads/${req.file.filename}` : null,
+      createdAt: new Date()
+    };
+
+    const result = await mealsCollection.insertOne(newMeal);
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to create meal" });
+  }
+});
+
+
+ app.get("/", (req, res) => {
       res.send({ status: "Server is running" });
     });
   } catch (err) {
