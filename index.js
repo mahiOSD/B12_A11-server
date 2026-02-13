@@ -133,23 +133,23 @@ app.get("/reviews", async (req, res) => {
 });
 
   
-    app.post("/favorites", async (req, res) => {
-      const fav = req.body;
+   app.post("/reviews", async (req, res) => {
+  const review = req.body;
 
-      const exists = await favoritesCollection.findOne({
-        userEmail: fav.userEmail,
-        mealId: fav.mealId,
-      });
+  const user = await usersCollection.findOne({
+    email: review.userEmail
+  });
 
-      if (exists) {
-        return res.send({ message: "Already added" });
-      }
+  if (user?.role !== "user") {
+    return res.status(403).send({ error: "Only users can review" });
+  }
 
-      fav.addedTime = new Date();
+  review.date = new Date();
 
-      const result = await favoritesCollection.insertOne(fav);
-      res.send(result);
-    });
+  const result = await reviewsCollection.insertOne(review);
+  res.send(result);
+});
+
 
     app.get("/favorites/:email", async (req, res) => {
       const email = req.params.email;
@@ -160,6 +160,33 @@ app.get("/reviews", async (req, res) => {
 
       res.send(result);
     });
+
+    app.post("/favorites", async (req, res) => {
+  const fav = req.body;
+
+  const user = await usersCollection.findOne({
+    email: fav.userEmail
+  });
+
+  if (user?.role !== "user") {
+    return res.status(403).send({ error: "Only users can add favorites" });
+  }
+
+  const exists = await favoritesCollection.findOne({
+    userEmail: fav.userEmail,
+    mealId: fav.mealId,
+  });
+
+  if (exists) {
+    return res.send({ message: "Already added" });
+  }
+
+  fav.addedTime = new Date();
+
+  const result = await favoritesCollection.insertOne(fav);
+  res.send(result);
+});
+
 
     
 app.delete("/reviews/:id", async (req, res) => {
@@ -184,20 +211,24 @@ app.delete("/favorites/:id", async (req, res) => {
 });
 
 
-  
-    app.post("/orders", async (req, res) => {
-      const order = req.body;
-      order.orderTime = new Date();
-      order.paymentStatus = "Pending";
+app.post("/orders", async (req, res) => {
+  const order = req.body;
 
-      const result = await ordersCollection.insertOne(order);
-      res.send(result);
-    });
+  const user = await usersCollection.findOne({
+    email: order.userEmail
+  });
 
-    app.get("/orders", async (req, res) => {
-  const result = await ordersCollection.find().toArray();
+  if (user?.role !== "user") {
+    return res.status(403).send({ error: "Only users can place orders" });
+  }
+
+  order.orderTime = new Date();
+  order.paymentStatus = "Pending";
+
+  const result = await ordersCollection.insertOne(order);
   res.send(result);
 });
+
 
 
     app.get("/orders/:email", async (req, res) => {
