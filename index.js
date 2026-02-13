@@ -320,32 +320,90 @@ const upload = multer({ storage: storage });
 
 app.use("/uploads", express.static("uploads"));
 
-
 app.post("/meals", upload.single("foodImage"), async (req, res) => {
   try {
-    const { foodName, price, rating, ingredients, estimatedDeliveryTime, chefExperience, chefName, chefId, userEmail } = req.body;
+    const { foodName, price, rating, ingredients, estimatedDeliveryTime, chefExperience, userEmail } = req.body;
+
+  
+    const chef = await usersCollection.findOne({ email: userEmail });
 
     const newMeal = {
       name: foodName,
       price: Number(price),
       rating: Number(rating),
-      ingredients: Array.isArray(ingredients) ? ingredients : [ingredients],
+
+      ingredients: ingredients
+        ? Array.isArray(ingredients)
+          ? ingredients.filter(i => i)
+          : [ingredients]
+        : [],
+
       estimatedDeliveryTime,
       chefExperience,
-      chefName,
-      chefId,
+
+      chefName: chef?.name || "Unknown Chef",
+      chefId: chef?.chefId || null,
+
       userEmail,
       image: req.file ? `/uploads/${req.file.filename}` : null,
-      createdAt: new Date()
+      createdAt: new Date(),
     };
 
     const result = await mealsCollection.insertOne(newMeal);
     res.send(result);
+
   } catch (err) {
     console.error(err);
     res.status(500).send({ error: "Failed to create meal" });
   }
 });
+
+
+app.delete("/meals/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const result = await mealsCollection.deleteOne({
+      _id: new ObjectId(id)
+    });
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Delete failed" });
+  }
+});
+
+app.put("/meals/:id", upload.single("foodImage"), async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const updatedData = {
+      name: req.body.foodName,
+      price: Number(req.body.price),
+      rating: Number(req.body.rating),
+      ingredients: Array.isArray(req.body.ingredients)
+        ? req.body.ingredients
+        : [req.body.ingredients],
+      estimatedDeliveryTime: req.body.estimatedDeliveryTime,
+      chefExperience: req.body.chefExperience,
+      chefName: req.body.chefName,
+    };
+
+    if (req.file) {
+      updatedData.image = `/uploads/${req.file.filename}`;
+    }
+
+    const result = await mealsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updatedData }
+    );
+
+    res.send(result);
+  } catch (err) {
+    res.status(500).send({ error: "Update failed" });
+  }
+});
+
 
 
  app.get("/", (req, res) => {
