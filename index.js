@@ -19,7 +19,7 @@ const client = new MongoClient(process.env.DB_URI, {
 
 async function run() {
   try {
-    await client.connect();
+    
 
     const db = client.db("LocalChefBazar");
 
@@ -443,63 +443,50 @@ app.patch("/role-requests/:id", async (req, res) => {
   }
 });
 
-const multer = require("multer");
-const path = require("path");
+app.get("/meals/chef/:chefId", async (req, res) => {
+  try {
+    const { chefId } = req.params;
 
+    const meals = await mealsCollection
+      .find({ chefId })
+      .toArray();
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/"); 
-  },
-  filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
+    res.send({ meals });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch chef meals" });
   }
 });
 
-const upload = multer({ storage: storage });
 
 
-app.use("/uploads", express.static("uploads"));
 
-app.post("/meals", upload.single("foodImage"), async (req, res) => {
+app.post("/meals", async (req, res) => {
   try {
-    const { foodName, price, rating, ingredients, estimatedDeliveryTime,deliveryArea, chefExperience, userEmail } = req.body;
+    const { foodName, price, rating, ingredients, estimatedDeliveryTime, deliveryArea, chefExperience, userEmail, image } = req.body;
 
     const chef = await usersCollection.findOne({ email: userEmail });
-
     if (!chef) return res.status(404).send({ error: "Chef not found" });
-
-    if (chef.role !== "chef") {
-      return res.status(403).send({ error: "Only chefs can create meals" });
-    }
-
-    if (chef.status === "fraud") {
-      return res.status(403).send({ error: "Fraud chefs cannot create meals" });
-    }
+    if (chef.role !== "chef") return res.status(403).send({ error: "Only chefs can create meals" });
+    if (chef.status === "fraud") return res.status(403).send({ error: "Fraud chefs cannot create meals" });
 
     const newMeal = {
       name: foodName,
       price: Number(price),
       rating: Number(rating),
-      ingredients: ingredients
-        ? Array.isArray(ingredients)
-          ? ingredients.filter(i => i)
-          : [ingredients]
-        : [],
+      ingredients: ingredients ? (Array.isArray(ingredients) ? ingredients.filter(i => i) : [ingredients]) : [],
       estimatedDeliveryTime,
-       deliveryArea,
+      deliveryArea,
       chefExperience,
       chefName: chef.name,
       chefId: chef.chefId,
       userEmail,
-      image: req.file ? `/uploads/${req.file.filename}` : null,
+      image: image || null,  
       createdAt: new Date(),
     };
 
     const result = await mealsCollection.insertOne(newMeal);
     res.send(result);
-
   } catch (err) {
     console.error(err);
     res.status(500).send({ error: "Failed to create meal" });
@@ -521,24 +508,34 @@ app.delete("/meals/:id", async (req, res) => {
   }
 });
 
-app.put("/meals/:id", upload.single("foodImage"), async (req, res) => {
+
+app.put("/meals/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ error: "Invalid meal ID" });
+    }
+
+    const { foodName, price, rating, ingredients, estimatedDeliveryTime, deliveryArea, chefExperience, chefName, image } = req.body;
+
     const updatedData = {
-      name: req.body.foodName,
-      price: Number(req.body.price),
-      rating: Number(req.body.rating),
-      ingredients: Array.isArray(req.body.ingredients)
-        ? req.body.ingredients
-        : [req.body.ingredients],
-      estimatedDeliveryTime: req.body.estimatedDeliveryTime,
-      chefExperience: req.body.chefExperience,
-      chefName: req.body.chefName,
+      name: foodName,
+      price: Number(price),
+      rating: Number(rating),
+      ingredients: ingredients
+        ? Array.isArray(ingredients)
+          ? ingredients.filter(i => i)
+          : [ingredients]
+        : [],
+      estimatedDeliveryTime,
+      deliveryArea,
+      chefExperience,
+      chefName,
     };
 
-    if (req.file) {
-      updatedData.image = `/uploads/${req.file.filename}`;
+    if (image) {
+      updatedData.image = image; 
     }
 
     const result = await mealsCollection.updateOne(
@@ -546,11 +543,17 @@ app.put("/meals/:id", upload.single("foodImage"), async (req, res) => {
       { $set: updatedData }
     );
 
-    res.send(result);
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ error: "Meal not found" });
+    }
+
+    res.send({ message: "Meal updated successfully", modifiedCount: result.modifiedCount });
   } catch (err) {
-    res.status(500).send({ error: "Update failed" });
+    console.error(err);
+    res.status(500).send({ error: "Failed to update meal" });
   }
 });
+
 
 
 app.get("/users", async (req, res) => {
