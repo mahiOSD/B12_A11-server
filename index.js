@@ -5,7 +5,7 @@ const { MongoClient, ObjectId, ServerApiVersion } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 5000;
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
@@ -66,12 +66,30 @@ app.get("/users/:email", async (req, res) => {
   res.send(user);
 });
 
-
-
 app.get("/meals", async (req, res) => {
-      const result = await mealsCollection.find().toArray();
-      res.send(result);
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+
+    const skip = (page - 1) * limit;
+
+    const meals = await mealsCollection
+      .find()
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    const totalMeals = await mealsCollection.countDocuments();
+
+    res.send({
+      meals,
+      totalMeals,
     });
+  } catch (error) {
+    res.status(500).send({ error: "Failed to fetch meals" });
+  }
+});
+
 
 app.get("/meals/:id", async (req, res) => {
       const id = req.params.id;
@@ -218,8 +236,14 @@ app.post("/orders", async (req, res) => {
     email: order.userEmail
   });
 
-  if (user?.role !== "user") {
+  if (!user) return res.status(404).send({ error: "User not found" });
+
+  if (user.role !== "user") {
     return res.status(403).send({ error: "Only users can place orders" });
+  }
+
+  if (user.status === "fraud") {
+    return res.status(403).send({ error: "Fraud users cannot place orders" });
   }
 
   order.orderTime = new Date();
@@ -231,7 +255,7 @@ app.post("/orders", async (req, res) => {
 
 
 
-    app.get("/orders/:email", async (req, res) => {
+app.get("/orders/:email", async (req, res) => {
   const email = req.params.email;
 
   const result = await ordersCollection
@@ -240,6 +264,93 @@ app.post("/orders", async (req, res) => {
 
   res.send(result);
 });
+
+
+app.patch("/orders/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ error: "Invalid order ID" });
+    }
+
+    let newStatus;
+    if (action === "cancel") newStatus = "cancelled";
+    else if (action === "accept") newStatus = "accepted";
+    else if (action === "deliver") newStatus = "delivered";
+    else return res.status(400).send({ error: "Invalid action" });
+
+    const result = await ordersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { orderStatus: newStatus } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ error: "Order not found" });
+    }
+
+    res.send({ message: `Order ${newStatus}`, modifiedCount: result.modifiedCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Server error" });
+  }
+});
+
+app.post("/create-stripe-session", async (req, res) => {
+  try {
+    const { orderId, amount } = req.body;
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `Order ${orderId}`,
+            },
+            unit_amount: Math.round(amount * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      success_url: `${process.env.SITE_DOMAIN}/payment-success/${orderId}`,
+      cancel_url: `${process.env.SITE_DOMAIN}/dashboard/my-orders`,
+    });
+
+    res.send({ url: session.url });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send({ error: "Stripe session failed" });
+  }
+});
+
+app.patch("/orders/pay/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid order ID" });
+
+  const result = await ordersCollection.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { paymentStatus: "paid" } }
+  );
+
+  if (result.matchedCount === 0) return res.status(404).send({ error: "Order not found" });
+
+  res.send({ message: "Payment successful" });
+});
+
+app.get("/orders/order/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const order = await ordersCollection.findOne({
+    _id: new ObjectId(id),
+  });
+
+  res.send(order);
+});
+
 
 app.get("/chef-orders/:chefId", async (req, res) => {
   const chefId = req.params.chefId;
@@ -353,28 +464,34 @@ app.use("/uploads", express.static("uploads"));
 
 app.post("/meals", upload.single("foodImage"), async (req, res) => {
   try {
-    const { foodName, price, rating, ingredients, estimatedDeliveryTime, chefExperience, userEmail } = req.body;
+    const { foodName, price, rating, ingredients, estimatedDeliveryTime,deliveryArea, chefExperience, userEmail } = req.body;
 
-  
     const chef = await usersCollection.findOne({ email: userEmail });
+
+    if (!chef) return res.status(404).send({ error: "Chef not found" });
+
+    if (chef.role !== "chef") {
+      return res.status(403).send({ error: "Only chefs can create meals" });
+    }
+
+    if (chef.status === "fraud") {
+      return res.status(403).send({ error: "Fraud chefs cannot create meals" });
+    }
 
     const newMeal = {
       name: foodName,
       price: Number(price),
       rating: Number(rating),
-
       ingredients: ingredients
         ? Array.isArray(ingredients)
           ? ingredients.filter(i => i)
           : [ingredients]
         : [],
-
       estimatedDeliveryTime,
+       deliveryArea,
       chefExperience,
-
-      chefName: chef?.name || "Unknown Chef",
-      chefId: chef?.chefId || null,
-
+      chefName: chef.name,
+      chefId: chef.chefId,
       userEmail,
       image: req.file ? `/uploads/${req.file.filename}` : null,
       createdAt: new Date(),
@@ -436,8 +553,80 @@ app.put("/meals/:id", upload.single("foodImage"), async (req, res) => {
 });
 
 
+app.get("/users", async (req, res) => {
+  try {
+    const allUsers = await usersCollection.find().toArray();
+    res.send(allUsers);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch users" });
+  }
+});
 
- app.get("/", (req, res) => {
+app.patch("/users/fraud/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid user ID" });
+
+    const user = await usersCollection.findOne({ _id: new ObjectId(id) });
+    if (!user) return res.status(404).send({ error: "User not found" });
+
+    if (user.role === "admin") {
+      return res.status(403).send({ error: "Cannot mark admin as fraud" });
+    }
+
+    if (user.status === "fraud") {
+      return res.status(400).send({ error: "User already fraud" });
+    }
+
+    const result = await usersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: "fraud" } }
+    );
+
+    res.send({ message: "User marked as fraud successfully", result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Server error" });
+  }
+});
+
+app.get("/platform-stats", async (req, res) => {
+  try {
+    const usersCount = await usersCollection.countDocuments();
+
+    const pendingOrders = await ordersCollection.countDocuments({
+      orderStatus: "pending"
+    });
+
+    const deliveredOrders = await ordersCollection.countDocuments({
+      orderStatus: "delivered"
+    });
+
+    const paidOrders = await ordersCollection.find({
+      paymentStatus: "paid"
+    }).toArray();
+
+    const totalPayment = paidOrders.reduce(
+      (sum, order) => sum + order.price * order.quantity,
+      0
+    );
+
+    res.send({
+      totalUsers: usersCount,
+      ordersPending: pendingOrders,
+      ordersDelivered: deliveredOrders,
+      totalPayment
+    });
+
+  } catch (error) {
+    res.status(500).send({ error: "Failed to load statistics" });
+  }
+});
+
+
+app.get("/", (req, res) => {
       res.send({ status: "Server is running" });
     });
   } catch (err) {
